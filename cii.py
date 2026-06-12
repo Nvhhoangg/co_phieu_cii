@@ -14,15 +14,20 @@ st.markdown("---")
 # --- HÀM TẢI DỮ LIỆU & TÍNH CHỈ BÁO ---
 @st.cache_data
 def load_and_process_data():
-    # Tải dữ liệu từ Vnstock
+    # 1. Khởi tạo vnstock với nguồn TCBS
     stock = Vnstock().stock(symbol='CII', source='TCBS')
-    headers = {
+    
+    # 2. ĐÚNG CÁCH: Ghi đè cấu hình headers trực tiếp vào session kết nối của vnstock
+    custom_headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Referer': 'https://tcinvest.tcbs.com.vn/'
     }
-    df = stock.quote.history(start='2023-01-01', end='2026-06-11', headers=headers)
+    stock.config.headers.update(custom_headers)
     
-    # Sắp xếp và định dạng lại dữ liệu
+    # 3. Gọi hàm lấy dữ liệu lịch sử (Không truyền tham số headers vào đây nữa để tránh TypeError)
+    df = stock.quote.history(start='2023-01-01', end='2026-06-11')
+    
+    # Sắp xếp và xử lý dữ liệu thời gian
     df = df.sort_values('time').reset_index(drop=True)
     df['time'] = pd.to_datetime(df['time'])
     
