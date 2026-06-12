@@ -14,27 +14,55 @@ st.markdown("---")
 # --- HÀM TẢI DỮ LIỆU & TÍNH CHỈ BÁO ---
 @st.cache_data
 def load_and_process_data():
-    # 1. Khởi tạo vnstock với nguồn TCBS
-    stock = Vnstock().stock(symbol='CII', source='TCBS')
+    import requests
+    import json
     
-    # 2. ĐÚNG CÁCH: Ghi đè cấu hình headers trực tiếp vào session kết nối của vnstock
-    custom_headers = {
+    # 1. Gọi trực tiếp endpoint API lịch sử giá của TCBS
+    # Khoảng thời gian từ 2023-01-01 đến 2026-06-11 tương ứng với các mốc Unix timestamp
+    url = "https://apipubcks.tcbs.com.vn/stock-insight/v1/stock/bars-long-term?ticker=CII&type=stock&resolution=D&from=1672534800&to=1781139600"
+    
+    # 2. Tạo headers chuẩn giả lập trình duyệt để chống chặn 403 tuyệt đối
+    headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Origin': 'https://tcinvest.tcbs.com.vn',
         'Referer': 'https://tcinvest.tcbs.com.vn/'
     }
-    stock.config.headers.update(custom_headers)
     
-    # 3. Gọi hàm lấy dữ liệu lịch sử (Không truyền tham số headers vào đây nữa để tránh TypeError)
-    df = stock.quote.history(start='2023-01-01', end='2026-06-11')
+    # 3. Tiến hành gửi yêu cầu lấy dữ liệu dạng JSON
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+        raise Exception(f"Không thể tải dữ liệu từ TCBS. Mã lỗi: {response.status_code}")
+        
+    result = response.json()
     
-    # Sắp xếp và xử lý dữ liệu thời gian
-    df = df.sort_values('time').reset_index(drop=True)
+    # 4. Chuyển đổi cấu trúc JSON từ TCBS sang Pandas DataFrame
+    # Định dạng trả về của TCBS thường chứa mảng 'data' gồm các object giá
+    data_list = result.get('data', [])
+    df = pd.DataFrame(data_list)
+    
+    # Đồng bộ tên cột chuẩn (time, open, high, low, close, volume)
+    # TCBS API trả về: tradingDate -> time, closePrice -> close, v.v...
+    # Kiểm tra cột thực tế và đổi tên
+    rename_dict = {
+        'tradingDate': 'time',
+        'closePrice': 'close',
+        'openPrice': 'open',
+        'highPrice': 'high',
+        'lowPrice': 'low',
+        'totalVolume': 'volume'
+    }
+    df = df.rename(columns=rename_dict)
+    
+    # Định dạng lại cột thời gian và giá trị số
     df['time'] = pd.to_datetime(df['time'])
+    df = df.sort_values('time').reset_index(drop=True)
+    df['close'] = pd.to_numeric(df['close'])
     
-    # 4. Tính toán Đường trung bình động MA(20)
+    # 5. Tính toán Đường trung bình động MA(20)
     df['MA20'] = df['close'].rolling(window=20).mean()
     
-    # 5. Tính toán Chỉ số sức mạnh tương đối RSI(14)
+    # 6. Tính toán Chỉ số sức mạnh tương đối RSI(14)
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
