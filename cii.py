@@ -14,14 +14,22 @@ st.markdown("---")
 # --- HÀM TẢI DỮ LIỆU & TÍNH CHỈ BÁO ---
 @st.cache_data
 def load_and_process_data():
-    # Tải dữ liệu từ Yahoo Finance (Mã CII trên sàn HOSE là CII.HM)
+    import requests
+    # 1. Khởi tạo một phiên kết nối có gán trình duyệt giả lập cho yfinance
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+    })
+    
     ticker = "CII.HM"
-    # Lấy dữ liệu lịch sử từ năm 2023 đến hiện tại
-    df_history = yf.download(ticker, start="2023-01-01", end="2026-06-11")
+    # 2. Truyền thêm session bảo mật vào hàm download để vượt tường lửa Yahoo
+    df_history = yf.download(ticker, start="2023-01-01", end="2026-06-11", session=session)
     
     # Kiểm tra nếu dữ liệu trống
     if df_history.empty:
-        raise Exception("Không thể tải dữ liệu từ Yahoo Finance. Vui lòng kiểm tra lại kết nối mạng.")
+        raise Exception("Không thể kết nối tới Yahoo Finance. Hệ thống đang bảo trì, vui lòng thử lại sau.")
         
     # Xử lý cấu trúc dữ liệu phẳng
     df = df_history.reset_index()
@@ -33,14 +41,14 @@ def load_and_process_data():
     df = df.sort_values('time').reset_index(drop=True)
     df['close'] = pd.to_numeric(df['close'])
     
-    # Do dữ liệu Yahoo Finance đối với chứng khoán VN đôi khi bị chia 1000, chúng ta chuẩn hóa lại giá VND
+    # Chuẩn hóa lại giá VND (nếu Yahoo trả về giá đã chia 1000)
     if df['close'].max() < 1000:
         df['close'] = df['close'] * 1000
 
-    # 1. Tính toán Đường trung bình động MA(20)
+    # 3. Tính toán Đường trung bình động MA(20)
     df['MA20'] = df['close'].rolling(window=20).mean()
     
-    # 2. Tính toán Chỉ số sức mạnh tương đối RSI(14)
+    # 4. Tính toán Chỉ số sức mạnh tương đối RSI(14)
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -48,7 +56,6 @@ def load_and_process_data():
     df['RSI14'] = 100 - (100 / (1 + rs))
     
     return df
-
 try:
     df_raw = load_and_process_data()
     
