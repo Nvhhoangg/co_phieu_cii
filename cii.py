@@ -15,15 +15,21 @@ st.markdown("---")
 @st.cache_data
 def load_and_process_data():
     # Tải dữ liệu từ Vnstock
-    stock = Vnstock().stock(symbol='CII', source='DNSE')
-    df = stock.quote.history(start='2023-01-01', end='2026-06-11')
+    stock = Vnstock().stock(symbol='CII', source='TCBS')
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://tcinvest.tcbs.com.vn/'
+    }
+    df = stock.quote.history(start='2023-01-01', end='2026-06-11', headers=headers)
+    
+    # Sắp xếp và định dạng lại dữ liệu
     df = df.sort_values('time').reset_index(drop=True)
     df['time'] = pd.to_datetime(df['time'])
     
-    # 1. Tính toán Đường trung bình động MA(20)
+    # 4. Tính toán Đường trung bình động MA(20)
     df['MA20'] = df['close'].rolling(window=20).mean()
     
-    # 2. Tính toán Chỉ số sức mạnh tương đối RSI(14)
+    # 5. Tính toán Chỉ số sức mạnh tương đối RSI(14)
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
