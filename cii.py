@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from sklearn.ensemble import RandomForestRegressor
-from vnstock3 import Vnstock
+import yfinance as yf
 
 # --- CẤU HÌNH TRANG WEB ---
 st.set_page_config(page_title="Phân tích cổ phiếu CII", layout="wide")
@@ -14,55 +14,33 @@ st.markdown("---")
 # --- HÀM TẢI DỮ LIỆU & TÍNH CHỈ BÁO ---
 @st.cache_data
 def load_and_process_data():
-    import requests
-    import json
+    # Tải dữ liệu từ Yahoo Finance (Mã CII trên sàn HOSE là CII.HM)
+    ticker = "CII.HM"
+    # Lấy dữ liệu lịch sử từ năm 2023 đến hiện tại
+    df_history = yf.download(ticker, start="2023-01-01", end="2026-06-11")
     
-    # 1. Gọi trực tiếp endpoint API lịch sử giá của TCBS
-    # Khoảng thời gian từ 2023-01-01 đến 2026-06-11 tương ứng với các mốc Unix timestamp
-    url = "https://apipubcks.tcbs.com.vn/stock-insight/v1/stock/bars-long-term?ticker=CII&type=stock&resolution=D&from=1672534800&to=1781139600"
-    
-    # 2. Tạo headers chuẩn giả lập trình duyệt để chống chặn 403 tuyệt đối
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Origin': 'https://tcinvest.tcbs.com.vn',
-        'Referer': 'https://tcinvest.tcbs.com.vn/'
-    }
-    
-    # 3. Tiến hành gửi yêu cầu lấy dữ liệu dạng JSON
-    response = requests.get(url, headers=headers)
-    if response.status_code != 200:
-        raise Exception(f"Không thể tải dữ liệu từ TCBS. Mã lỗi: {response.status_code}")
+    # Kiểm tra nếu dữ liệu trống
+    if df_history.empty:
+        raise Exception("Không thể tải dữ liệu từ Yahoo Finance. Vui lòng kiểm tra lại kết nối mạng.")
         
-    result = response.json()
+    # Xử lý cấu trúc dữ liệu phẳng
+    df = df_history.reset_index()
+    df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
     
-    # 4. Chuyển đổi cấu trúc JSON từ TCBS sang Pandas DataFrame
-    # Định dạng trả về của TCBS thường chứa mảng 'data' gồm các object giá
-    data_list = result.get('data', [])
-    df = pd.DataFrame(data_list)
-    
-    # Đồng bộ tên cột chuẩn (time, open, high, low, close, volume)
-    # TCBS API trả về: tradingDate -> time, closePrice -> close, v.v...
-    # Kiểm tra cột thực tế và đổi tên
-    rename_dict = {
-        'tradingDate': 'time',
-        'closePrice': 'close',
-        'openPrice': 'open',
-        'highPrice': 'high',
-        'lowPrice': 'low',
-        'totalVolume': 'volume'
-    }
-    df = df.rename(columns=rename_dict)
-    
-    # Định dạng lại cột thời gian và giá trị số
+    # Đồng bộ tên cột chuẩn
+    df = df.rename(columns={'Date': 'time', 'Close': 'close'})
     df['time'] = pd.to_datetime(df['time'])
     df = df.sort_values('time').reset_index(drop=True)
     df['close'] = pd.to_numeric(df['close'])
     
-    # 5. Tính toán Đường trung bình động MA(20)
+    # Do dữ liệu Yahoo Finance đối với chứng khoán VN đôi khi bị chia 1000, chúng ta chuẩn hóa lại giá VND
+    if df['close'].max() < 1000:
+        df['close'] = df['close'] * 1000
+
+    # 1. Tính toán Đường trung bình động MA(20)
     df['MA20'] = df['close'].rolling(window=20).mean()
     
-    # 6. Tính toán Chỉ số sức mạnh tương đối RSI(14)
+    # 2. Tính toán Chỉ số sức mạnh tương đối RSI(14)
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -88,8 +66,11 @@ try:
         rsi_status = "Quá mua (Rủi ro)" if latest_rsi > 70 else ("Quá bán (Cơ hội)" if latest_rsi < 30 else "Trung tính")
         st.metric(label="Chỉ báo RSI (14)", value=f"{latest_rsi:.2f}", delta=rsi_status, delta_color="off" if rsi_status == "Trung tính" else "inverse")
     with col_info3:
-        ma_delta = f"Trên MA20 (+{latest_close - latest_ma20:,.0f}đ)" if latest_close > latest_ma20 else f"Dưới MA20 ({latest_close - latest_ma20:,.0f}đ)"
-        st.metric(label="Đường MA(20)", value=f"{latest_ma20:,.0f} VND", delta=ma_delta)
+        if pd.isna(latest_ma20):
+            st.metric(label="Đường MA(20)", value="Đang tính toán...")
+        else:
+            ma_delta = f"Trên MA20 (+{latest_close - latest_ma20:,.0f}đ)" if latest_close > latest_ma20 else f"Dưới MA20 ({latest_close - latest_ma20:,.0f}đ)"
+            st.metric(label="Đường MA(20)", value=f"{latest_ma20:,.0f} VND", delta=ma_delta)
 
     st.markdown("---")
 
@@ -112,13 +93,11 @@ try:
 
     st.markdown("---")
 
-    # --- KHỐI DỰ ĐOÁN AI (RANDOM FOREST - SIÊU NHẸ) ---
+    # --- KHỐI DỰ ĐOÁN AI (RANDOM FOREST) ---
     st.subheader("🔮 Dự đoán xu hướng giá bằng Trí tuệ nhân tạo (Machine Learning)")
     
     if st.button("🚀 Kích hoạt AI dự đoán giá ngày mai"):
         with st.spinner("Mô hình đang phân tích dữ liệu, vui lòng đợi vài giây..."):
-            
-            # Chuẩn bị dữ liệu dạng chuỗi thời gian (60 ngày trước đoán ngày sau)
             prices = df_raw['close'].values
             X, y = [], []
             for i in range(60, len(prices)):
@@ -126,26 +105,21 @@ try:
                 y.append(prices[i])
             X, y = np.array(X), np.array(y)
             
-            # Chia tập dữ liệu huấn luyện (80% train)
             train_size = int(len(X) * 0.8)
             X_train, y_train = X[:train_size], y[:train_size]
             X_test, y_test = X[train_size:], y[train_size:]
             
-            # Khởi tạo và huấn luyện mô hình Random Forest (Chỉ mất < 1 giây)
             model = RandomForestRegressor(n_estimators=100, random_state=42)
             model.fit(X_train, y_train)
             
-            # Dự đoán trên tập Test
             predictions = model.predict(X_test)
             
-            # Dự đoán giá ngày mai
             last_60_days = prices[-60:].reshape(1, -1)
             tomorrow_price = model.predict(last_60_days)[0]
             
             price_delta = tomorrow_price - latest_close
             percent_delta = (price_delta / latest_close) * 100
 
-            # Hiển thị kết quả AI
             st.markdown("### 📈 KẾT QUẢ DỰ ĐOÁN CHO PHIÊN TIẾP THEO")
             col_res1, col_res2 = st.columns([1, 2])
             
@@ -157,10 +131,9 @@ try:
                     st.metric(label="Dự đoán giá phiên ngày mai", value=f"{tomorrow_price:,.0f} VND", delta=f"GIẢM {price_delta:,.0f} VND ({percent_delta:.2f}%)", delta_color="inverse")
                     st.error("🔴 Tín hiệu ngắn hạn: **GIẢM GIÁ**")
                     
-                st.info("⚠️ *Khuyến nghị:* Kết quả dựa trên học máy thống kê lịch sử giá, không bao gồm các yếu tố tin tức vĩ mô đột xuất.")
+                st.info("⚠️ *Khuyến nghị:* Kết quả dựa trên dữ liệu lịch sử Yahoo Finance, mang tính chất tham khảo kỹ thuật.")
 
             with col_res2:
-                # Biểu đồ kết quả dự đoán
                 fig_ai = go.Figure()
                 fig_ai.add_trace(go.Scatter(x=df_raw['time'][:train_size+60], y=df_raw['close'][:train_size+60], name='Dữ liệu Train', line=dict(color='#1f77b4')))
                 fig_ai.add_trace(go.Scatter(x=df_raw['time'][train_size+60:], y=y_test, name='Giá Thực Tế (Test)', line=dict(color='#2ca02c')))

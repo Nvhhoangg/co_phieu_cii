@@ -3,5 +3,5 @@ numpy
 pandas
 plotly
 scikit-learn
-vnstock3
+yfinance
 ipython
