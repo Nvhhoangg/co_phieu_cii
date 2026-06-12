@@ -15,7 +15,7 @@ st.markdown("---")
 @st.cache_data
 def load_and_process_data():
     # Tải dữ liệu từ Vnstock
-    stock = Vnstock().stock(symbol='CII', source='VCI')
+    stock = Vnstock().stock(symbol='CII', source='DNSE')
     df = stock.quote.history(start='2023-01-01', end='2026-06-11')
     df = df.sort_values('time').reset_index(drop=True)
     df['time'] = pd.to_datetime(df['time'])
