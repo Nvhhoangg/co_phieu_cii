@@ -1,6 +1,7 @@
 streamlit
-numpy
 pandas
+numpy
 plotly
 scikit-learn
 requests
+vnstock3
